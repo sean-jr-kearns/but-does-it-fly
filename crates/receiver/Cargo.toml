@@ -4,14 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-protocol = { path = "../protocol" }
-gpio-cdev = "0.6"
+communication-protocol = { path = "../protocol" }
+
+bluer = { version = "0.17.4", features = ["bluetoothd"] }
+env_logger = "0.11"
+futures = "0.3"
+log = "0.4"
+rppal = "0.22.1"
+tokio = { version = "1", features = ["macros", "rt", "signal", "sync"] }
 
 [lints.clippy]
 all = "deny"
 pedantic = "deny"
 nursery = "deny"
-panic_used = "deny"
+expect_used = "deny"
+panic = "deny"
 unwrap_used = "deny"
 todo = "deny"
 unimplemented = "deny"

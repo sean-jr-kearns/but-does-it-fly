@@ -28,8 +28,23 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     nodejs \
     npm \
-    gcc-aarch64-linux-gnu \
+    # required for BLE builds
+    libdbus-1-dev \
+    bluez \ 
+    bluetooth \ 
+    dbus \
     && rm -rf /var/lib/apt/lists/*
+
+# Enable the linux arm64 architecture and windows target/package pools
+RUN sudo dpkg --add-architecture arm64 && \
+    sudo apt update && apt-get install -y \
+    # Install the ARM64 cross-compiler and the specific arm64 D-Bus library
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    gcc-mingw-w64-x86-64 \
+    binutils-mingw-w64 \
+    g++-mingw-w64 \
+    libdbus-1-dev:arm64
 
 # Ensure locale
 RUN locale-gen en_US.UTF-8
@@ -42,7 +57,11 @@ RUN mkdir -p /home/${USERNAME}/ && \
     chown -R ${UID}:${GID} /usr/local/cargo
 
 # Install some cargo tools
-RUN cargo install cargo-watch cargo-edit cargo-tarpaulin
+RUN cargo install cargo-watch \
+    cargo-edit \
+    cargo-tarpaulin \
+    cargo-sort \
+    cargo-machete
 
 # Working directory
 WORKDIR /workspace

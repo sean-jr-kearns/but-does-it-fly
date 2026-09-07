@@ -123,5 +123,6 @@ build*/**
 reports/**
 extern/**
 
-
+.env
 .tmp
+_archive

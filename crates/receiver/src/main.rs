@@ -1,95 +1,170 @@
-use gpio_cdev::{Chip, LineRequestFlags};
-use protocol::{Command, Response};
-use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
+mod gpio;
 
-const TCP_ADDRESS: &str = "0.0.0.0:7878";
+use communication_protocol::prelude::{
+    Command, LightState, ProtocolError, decode_command, encode_state,
+};
+use communication_protocol::{COMMAND_CHARACTERISTIC_UUID, DEVICE_NAME, SERVICE_UUID};
 
-// Raspberry Pi GPIO17 = GPIO chip line 17.
-const GPIO_LINE: u32 = 17;
+use bluer::{
+    adv::Advertisement,
+    gatt::local::{
+        Application, Characteristic, CharacteristicRead, CharacteristicWrite,
+        CharacteristicWriteMethod, Service,
+    },
+};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Opening GPIO...");
+use futures::FutureExt;
+use std::sync::Arc;
 
-    let mut chip = Chip::new("/dev/gpiochip0")?;
+use tokio::sync::Mutex;
 
-    let handle =
-        chip.get_line(GPIO_LINE)?
-            .request(LineRequestFlags::OUTPUT, 0, "embedded-light")?;
+use gpio::{Indicator, LightOutput};
 
-    println!("GPIO {GPIO_LINE} initialized.");
-    println!("Listening on {TCP_ADDRESS}");
+const GPIO_PIN: u8 = 23;
 
-    let listener = TcpListener::bind(TCP_ADDRESS)?;
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> bluer::Result<()> {
+    env_logger::init();
 
-    for connection in listener.incoming() {
-        match connection {
-            Ok(stream) => {
-                println!("Client connected: {}", stream.peer_addr()?);
+    let light = Indicator::new(GPIO_PIN).map_or_else(
+        |_| {
+            Err(ProtocolError::InvalidPeripheral(
+                "failed to setup indicator".to_string(),
+            ))
+        },
+        |light| Ok(Arc::new(Mutex::new(Box::new(light)))),
+    );
 
-                if let Err(err) = handle_client(stream, &handle) {
-                    eprintln!("Client error: {err}");
-                }
+    let session = bluer::Session::new().await?;
+    let adapter = session.default_adapter().await?;
 
-                println!("Client disconnected.");
-            }
+    adapter.set_powered(true).await?;
 
-            Err(err) => {
-                eprintln!("Connection failed: {err}");
-            }
-        }
-    }
+    println!("Bluetooth adapter: {}", adapter.name());
 
-    Ok(())
-}
+    println!("Bluetooth address: {}", adapter.address().await?);
 
-fn handle_client(
-    mut stream: TcpStream,
-    gpio: &gpio_cdev::LineHandle,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let advertisement = Advertisement {
+        service_uuids: vec![SERVICE_UUID].into_iter().collect(),
 
-    let mut message = String::new();
-    reader.read_line(&mut message)?;
+        discoverable: Some(true),
 
-    println!("Received: {:?}", message.trim());
+        local_name: Some(DEVICE_NAME.to_string()),
 
-    let Ok(command) = Command::parse(&message) else {
-        stream.write_all(b"ERR\n")?;
-        return Ok(());
+        ..Default::default()
     };
 
-    let response = match command {
-        Command::On => {
-            println!("Turning light ON");
+    let adv_handle = adapter.advertise(advertisement).await?;
 
-            gpio.set_value(1)?;
+    let value = Arc::new(Mutex::new(encode_state(LightState::Off)));
 
-            Response::Ok
-        }
+    let value_read = value.clone();
+    let value_write = value.clone();
 
-        Command::Off => {
-            println!("Turning light OFF");
+    let light_write = light.map_err(|e| {
+        let io_err = std::io::Error::other(e.to_string());
+        bluer::Error::from(io_err)
+    })?;
 
-            gpio.set_value(0)?;
+    let application = Application {
+        services: vec![Service {
+            uuid: SERVICE_UUID,
 
-            Response::Ok
-        }
+            primary: true,
 
-        Command::Status => {
-            let value = gpio.get_value()?;
+            characteristics: vec![Characteristic {
+                uuid: COMMAND_CHARACTERISTIC_UUID,
 
-            if value == 1 {
-                Response::On
-            } else {
-                Response::Off
-            }
-        }
+                read: Some(CharacteristicRead {
+                    read: true,
+
+                    fun: Box::new(move |_request| {
+                        let value = value_read.clone();
+
+                        async move { Ok(value.lock().await.clone()) }.boxed()
+                    }),
+
+                    ..Default::default()
+                }),
+
+                write: Some(CharacteristicWrite {
+                    write: true,
+
+                    write_without_response: true,
+
+                    method: CharacteristicWriteMethod::Fun(Box::new(move |data, _request| {
+                        let value = value_write.clone();
+
+                        let light = light_write.clone();
+
+                        async move {
+                            let command = decode_command(&data)
+                                .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
+
+                            let mut light = light.lock().await;
+
+                            let state = match command {
+                                Command::On => {
+                                    light
+                                        .set_on()
+                                        .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
+
+                                    LightState::On
+                                }
+
+                                Command::Off => {
+                                    light
+                                        .set_off()
+                                        .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
+
+                                    LightState::Off
+                                }
+
+                                Command::Status => {
+                                    if light.is_on() {
+                                        LightState::On
+                                    } else {
+                                        LightState::Off
+                                    }
+                                }
+                            };
+
+                            *value.lock().await = encode_state(state);
+
+                            println!("command={command:?} state={state:?}");
+
+                            Ok(())
+                        }
+                        .boxed()
+                    })),
+
+                    ..Default::default()
+                }),
+
+                ..Default::default()
+            }],
+
+            ..Default::default()
+        }],
+
+        ..Default::default()
     };
 
-    let response_message = format!("{}\n", response.as_str());
+    let app_handle = adapter.serve_gatt_application(application).await?;
 
-    stream.write_all(response_message.as_bytes())?;
+    println!("Receiver started.");
+    println!("Device name: {DEVICE_NAME}");
+    println!("GPIO BCM pin: {GPIO_PIN}");
+    println!("Service UUID: {SERVICE_UUID}");
+    println!("Characteristic UUID: {COMMAND_CHARACTERISTIC_UUID}");
+    println!("Waiting for BLE commands...");
+
+    tokio::signal::ctrl_c().await?;
+
+    println!("Shutting down.");
+
+    drop(app_handle);
+    drop(adv_handle);
 
     Ok(())
 }
