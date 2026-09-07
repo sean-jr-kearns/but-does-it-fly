@@ -1,0 +1,22 @@
+services:
+  but-does-it-fly:
+    container_name: but-does-it-fly
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        - USERNAME=default
+        - UID=${UID}
+        - GID=${GID}
+    environment:
+      - USERNAME=default
+      - UID=${UID}
+      - GID=${GID}
+      - DEVICE_NAME=flyer-1
+      #- CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+    network_mode: "host"
+    privileged: true
+    volumes:
+      - ../:/workspace:cached
+      - /var/run/dbus:/var/run/dbus
+      - /run/dbus:/run/dbus

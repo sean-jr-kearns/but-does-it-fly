@@ -1,0 +1,34 @@
+{
+  "name": "Rust Dev Container",
+  "service": "but-does-it-fly",
+  "dockerComposeFile": "docker-compose.yml",
+  "workspaceFolder": "/workspace",
+  "updateRemoteUserUID": true,
+  "shutdownAction": "stopCompose",
+  "overrideCommand": false,
+  "initializeCommand": "echo Dev container initializing",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "serayuzgur.crates",
+        "vadimcn.vscode-lldb",
+        "mutantdino.resourcemonitor",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "rust-analyzer.checkOnSave.command": "clippy",
+        "editor.formatOnSave": true
+      }
+    }
+  },
+  "forwardPorts": [8080],
+  "remoteUser": "default",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": true
+    }
+  },
+  "postCreateCommand": "rustup component add rustfmt clippy llvm-tools-preview"
+}
