@@ -16,4 +16,18 @@ pub enum ProtocolError {
 
     #[error("bluetooth error {0}")]
     Bluetooth(String),
+
+    #[error("pin i/o error {0}")]
+    PinIO(String),
+
+    #[error("unknown error")]
+    Unknown(String),
+}
+
+impl<'a> From<&'a str> for ProtocolError {
+    fn from(s: &'a str) -> Self {
+        match s {
+            _ => ProtocolError::Unknown(s.to_string()),
+        }
+    }
 }

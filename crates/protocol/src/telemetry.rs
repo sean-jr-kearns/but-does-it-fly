@@ -39,7 +39,7 @@ pub struct Telemetry {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct TelemetryPacket {
     pub version: u8,
     pub reference_frame: u8,

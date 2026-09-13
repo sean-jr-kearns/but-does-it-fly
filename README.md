@@ -15,6 +15,7 @@ Currently BLE commands are setup to turn a gpio pinned light on and off. Device 
 - `TBD`: test hover command 
 - `TBD`: test touchdown command
 - `TBD`: test slight manuever command
+- `TBD`: ble auth impl
 
 ## Hardware
 - [Hawks F450 Drone Kit](https://www.hawks-work.com/products/f450-drone-kit-to-build-diy-450mm-wheelbase-4-axis-multi-rotor-drone-kit-b) 
@@ -110,11 +111,6 @@ rustup target add x86_64-pc-windows-gnu
 rustup target add aarch64-unknown-linux-gnu
 ```
 
-### light-show
-```bash
-CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build -p light-show --target aarch64-unknown-linux-gnu --release
-```
-
 ### protocol
 
 #### Linux ARM64
@@ -153,6 +149,7 @@ cargo build -p sender --target x86_64-unknown-linux-gnu --release
 
 #### Windows x86_64
 ```bash
+DEVICE_NAME="flyer-1" \
 cargo build -p sender --target x86_64-pc-windows-gnu --release
 ```
 
@@ -161,6 +158,7 @@ cargo build -p sender --target x86_64-pc-windows-gnu --release
 
 #### Linux ARM64
 ```bash
+DEVICE_NAME="flyer-1" \
 PKG_CONFIG_DIR="" \
 PKG_CONFIG_SYSROOT_DIR="/" \
 PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
@@ -183,7 +181,7 @@ cargo build -p receiver --target x86_64-unknown-linux-gnu --release
 To get the service on the rpi I have been `scp`'ing it with"
 
 ```bash
-scp ./target/aarch64-unknown-linux-gnu/release/sender user@ip:/opt/but-does-it-fly
+scp ./target/aarch64-unknown-linux-gnu/release/receiver user@ip:/opt/but-does-it-fly
 ```
 
 To run 
@@ -247,4 +245,15 @@ cargo doc --lib --no-deps
 ```
 
 ## Troubleshooting
+
+### Devcontainer permissions
 Sometimes on devcontainer restart may need to `sudo chown -R $(whoami):$(id -g) /usr/local/cargo` if different user
+
+### Gpio permissions
+Ran into some issues where the user didn't have `gpiomem` permissions. To update run and verify with:
+
+```bash
+sudo usermod -aG gpio $USER
+exec su -l $USER
+ls -l /dev/gpiomem
+```

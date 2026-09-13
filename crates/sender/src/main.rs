@@ -1,122 +1,76 @@
-use communication_protocol::prelude::{Command, decode_state, encode_command};
-use communication_protocol::{
-    COMMAND_CHARACTERISTIC_UUID, /*DEVICE_NAME,*/ ProtocolError, SERVICE_UUID,
+mod ble;
+
+use crate::ble::{
+    find_adapter, find_advertised_characteristic_by_id, find_device, find_device_peripheral,
+    read_from_peripheral, write_to_peripheral,
 };
-
-use btleplug::api::{Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter, WriteType};
-use btleplug::platform::Manager;
-use futures::stream::StreamExt;
-use std::{env, error::Error};
-
-fn parse_command() -> Result<Command, Box<dyn Error>> {
-    let argument = env::args().nth(1).ok_or("usage: sender <on|off|status>")?;
-
-    match argument.to_lowercase().as_str() {
-        "on" => Ok(Command::On),
-        "off" => Ok(Command::Off),
-        "status" => Ok(Command::Status),
-
-        _ => Err("command must be on, off, or status".into()),
-    }
-}
+use btleplug::api::Peripheral as _;
+use communication_protocol::{
+    ProtocolError,
+    prelude::{decode_response, encode_command, parse_command},
+};
+use std::io::{self, Write};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Get command from service command line arguments
-    let command = parse_command()?;
-    // Setup device adapter and connection
-    let manager = Manager::new().await?;
-    let adapters = manager.adapters().await?;
-    if adapters.is_empty() {
-        eprintln!("Error: No Bluetooth adapters found on this machine.");
-        return Ok(());
-    }
-    let adapter = adapters
-        .into_iter()
-        .next()
-        .ok_or(None)
-        .map_err(|_: Option<String>| {
-            ProtocolError::Bluetooth("failed to get bluetooth adapter".to_string())
-        })?;
-
-    // Start scanning just to discover the device's address
-    adapter.start_scan(ScanFilter::default()).await?;
-    let mut events = adapter.events().await?;
-
-    let mut found_target_id: Option<btleplug::platform::PeripheralId> = None;
-
-    println!("Scanning for device service UUID...");
-
-    while let Some(event) = events.next().await {
-        if let CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id) = event
-            && let Some(peripheral) = adapter.peripherals().await?.iter().find(|p| p.id() == id)
-            && let Ok(Some(properties)) = peripheral.properties().await
-        {
-            let matches = properties
-                .services
-                .iter()
-                .any(|u| u.to_string().to_lowercase() == SERVICE_UUID.to_string().to_lowercase());
-
-            if matches {
-                println!("Device found! Capturing literal MAC Address...");
-                found_target_id = Some(id);
-                break; // Exit immediately
-            }
-        }
-    }
-
-    std::mem::drop(events);
-    let _ = adapter.stop_scan().await;
-
+    let adapter = find_adapter().await?;
+    let target = find_device(&adapter.clone()).await?;
     // Sometimes on windows WinRT subsystem needs
     // a moment to completely unload the scan thread
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-
+    //tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let peripheral = find_device_peripheral(&adapter.clone(), &target.clone()).await?;
     // register device via direct address
-    if let Some(addr) = found_target_id {
-        println!("Injecting target address ({addr}) directly into the clean adapter...");
+    match peripheral.connect().await {
+        Ok(()) => {
+            info!("SUCCESS: connected to device");
+            peripheral.discover_services().await?;
+            info!("GATT services synchronized");
+            let characteristic = find_advertised_characteristic_by_id(peripheral.clone())?;
 
-        // Get clean handle and connect
-        let fresh_peripherals = adapter.peripherals().await?;
-        if let Some(peripheral) = fresh_peripherals.iter().find(|p| p.id() == addr) {
-            println!("Opening isolated GattSession to device...");
+            // YOU ARE HERE: Left off testing command loop
+            // arm disarm works the first time and then never again
+            // telemetry never actually turns on the light
+            // there are no packets being sent (e.g. telem should be over telem characteristic)
+            // that is, another characteristic need to be made and prove in logs on sender that telemetry is showing up
+            // should probably rename to device and station
 
-            match peripheral.connect().await {
-                Ok(()) => {
-                    println!("SUCCESS: Connected device cleanly!");
-                    peripheral.discover_services().await?;
-                    println!("GATT Services synchronized.");
+            loop {
+                // persist connection so that auth challenge from windows persists for the lifetime of the service
+                print!("Enter command: ");
 
-                    let characteristic = peripheral
-                        .characteristics()
-                        .into_iter()
-                        .find(|characteristic| characteristic.uuid == COMMAND_CHARACTERISTIC_UUID)
-                        .ok_or("command characteristic not found")?;
+                // Flush stdout to guarantee the prompt prints immediately
+                io::stdout().flush().unwrap();
+                let input = input_buffer()?;
+                let command = parse_command(&input)?;
+                let packet = encode_command(command);
+                let () = write_to_peripheral(peripheral.clone(), &characteristic, &packet).await?;
+                info!("Sent command: {command:?}");
 
-                    let packet = encode_command(command);
+                // move command logic into read frm/write to
+                // expand lightstate to be enum of states (rx/tx state, safety state?, commands?)
+                // expand command logic into enum struct impls per command arm disarm to start (which replaces light-show)
+                let response: Vec<u8> = peripheral.read(&characteristic).await?;
 
-                    peripheral
-                        .write(&characteristic, &packet, WriteType::WithResponse)
-                        .await?;
+                let response = decode_response(&response)?;
 
-                    println!("Sent command: {command:?}");
-
-                    let state = peripheral.read(&characteristic).await?;
-
-                    let state = decode_state(&state)?;
-
-                    println!("Light state: {state:?}");
-
-                    peripheral.disconnect().await?;
-                }
-                Err(e) => {
-                    println!("Machine refused the direct session hook: {e:?}");
-                }
+                info!("Response: {response:?}");
             }
+
+            peripheral.disconnect().await?;
         }
-    } else {
-        println!("Could not discover the device's advertisement packets.");
+        Err(e) => {
+            info!("Machine refused the direct session hook: {e:?}");
+        }
     }
 
     Ok(())
+}
+
+fn input_buffer() -> Result<String, ProtocolError> {
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| ProtocolError::Unknown(e.to_string()))?;
+    Ok(input.trim().to_string())
 }
