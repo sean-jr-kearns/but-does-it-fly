@@ -1,7 +1,6 @@
 pub mod commands;
 pub mod error;
 pub mod prelude;
-pub mod telemetry;
 
 pub use prelude::*;
 use uuid::Uuid;

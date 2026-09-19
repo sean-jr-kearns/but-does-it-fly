@@ -1,6 +1,15 @@
 pub trait Pin {
+    /// Turns pin high
+    ///
+    /// # Errors
+    /// Returns error if unable to manipulate pin state
     fn set_on(&mut self) -> Result<(), rppal::gpio::Error>;
+    /// Turns pin low
+    ///
+    /// # Errors
+    /// Returns error if unable to manipulate pin state
     fn set_off(&mut self) -> Result<(), rppal::gpio::Error>;
+    #[warn(unused)]
     fn is_on(&self) -> bool;
 }
 
@@ -11,6 +20,7 @@ pub struct MockPin {
 
 #[cfg(test)]
 impl MockPin {
+    #[must_use]
     pub const fn new() -> Self {
         Self { on: false }
     }
@@ -47,6 +57,10 @@ pub struct Indicator {
 
 #[cfg(target_os = "linux")]
 impl Indicator {
+    /// Creates new gpio pin
+    ///
+    /// # Errors
+    /// Returns error if unable to create new pin representation
     pub fn new(bcm_pin: u8) -> Result<Self, rppal::gpio::Error> {
         let gpio = rppal::gpio::Gpio::new()?;
 

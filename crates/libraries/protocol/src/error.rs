@@ -26,8 +26,6 @@ pub enum ProtocolError {
 
 impl<'a> From<&'a str> for ProtocolError {
     fn from(s: &'a str) -> Self {
-        match s {
-            _ => ProtocolError::Unknown(s.to_string()),
-        }
+        Self::Unknown(s.to_string())
     }
 }

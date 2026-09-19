@@ -1,5 +1,5 @@
-use crate::gpio::{Indicator, Pin};
 use communication_protocol::ProtocolError;
+use gpio_lights::{Indicator, Pin};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::Mutex, task::JoinHandle, time::sleep};
 use tokio_util::sync::CancellationToken;
@@ -12,6 +12,10 @@ pub struct SafetyLights {
 }
 
 impl SafetyLights {
+    /// Creates new safety lights executor given light pin locations
+    ///
+    /// # Errors
+    /// Returns error if unable to instantiate indicators
     pub fn new(green_pin: u8, red_pin: u8) -> Result<Self, ProtocolError> {
         let token = CancellationToken::new();
         let green_pin = Indicator::new(green_pin).map_or_else(
@@ -40,7 +44,7 @@ impl SafetyLights {
         })
     }
 
-    pub async fn run(&mut self) -> Result<(), rppal::gpio::Error> {
+    pub fn run(&mut self) {
         // Clone used vars for spawned thread lifetime purposes
         let green = self.green_pin.clone();
         let red = self.red_pin.clone();
@@ -52,22 +56,16 @@ impl SafetyLights {
             loop {
                 tokio::select! {
                     // Instantly exit if the stop command is issued
-                    _ = token.cancelled() => {
+                    () = token.cancelled() => {
                         println!("Stop command received. Safely shutting down safety-lights...");
                         // Ensure pins are left in a safe/default state
-                        let mut green = green.lock().await;
-                        {
-                            let _ = green.set_off();
-                        }
-                        let mut red = red.lock().await;
-                        {
-                            let _ = red.set_off();
-                        }
+                        let _green = green.lock().await.set_off();
+                        let _red = red.lock().await.set_off();
                         break;
                     }
 
                     // Toggling Sequence
-                    _ = async {
+                    () = async {
                         let mut green = green.lock().await;
                         let mut red = red.lock().await;
 
@@ -78,6 +76,8 @@ impl SafetyLights {
                         let _ = green.set_off();
                         let _ = red.set_off();
                         sleep(Duration::from_millis(1000)).await;
+                        drop(green);
+                        drop(red);
                     } => {}
                 }
             }
@@ -86,17 +86,16 @@ impl SafetyLights {
         });
 
         self.handle = Some(handle);
-        Ok(())
     }
 
-    pub async fn stop(&mut self) -> Result<bool, rppal::gpio::Error> {
+    pub fn stop(&mut self) -> bool {
         // Issue the stop command
         println!("Issuing safety-lights stop command...");
         self.cancellation_token.cancel();
 
         // Wait for the loop to finish its cleanup
-        let _ = self.handle;
+        self.handle = None;
         println!("Safety-lights stopped");
-        Ok(true)
+        true
     }
 }

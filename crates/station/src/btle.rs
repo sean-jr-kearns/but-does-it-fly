@@ -2,9 +2,10 @@ use btleplug::api::{
     Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
-use communication_protocol::{COMMAND_CHARACTERISTIC_UUID, ProtocolError, SERVICE_UUID};
+use communication_protocol::{ProtocolError, SERVICE_UUID};
 use futures::stream::StreamExt;
 use tracing::info;
+use uuid::Uuid;
 
 pub async fn find_adapter() -> Result<Adapter, ProtocolError> {
     let manager = Manager::new().await.map_err(|_| {
@@ -70,7 +71,7 @@ pub async fn find_device(adapter: &Adapter) -> Result<Option<PeripheralId>, Prot
 
 pub async fn find_device_peripheral(
     adapter: &Adapter,
-    target: &Option<PeripheralId>,
+    target: Option<&PeripheralId>,
 ) -> Result<Peripheral, ProtocolError> {
     if let Some(addr) = target {
         info!("Injecting target ({addr}) into clean adapter...");
@@ -94,12 +95,13 @@ pub async fn find_device_peripheral(
 /// # Errors
 /// Returns [`ProtocolError`] if unable to find the characteristic
 pub fn find_advertised_characteristic_by_id(
-    peripheral: Peripheral,
+    peripheral: &Peripheral,
+    uuid: Uuid,
 ) -> Result<Characteristic, ProtocolError> {
     let characteristic = peripheral
         .characteristics()
         .into_iter()
-        .find(|characteristic| characteristic.uuid == COMMAND_CHARACTERISTIC_UUID)
+        .find(|characteristic| characteristic.uuid == uuid)
         .ok_or("command characteristic not found")?;
     Ok(characteristic)
 }
@@ -108,9 +110,9 @@ pub fn find_advertised_characteristic_by_id(
 ///
 /// # Returns [`ProtocolError`] if unable to write the packet
 pub async fn write_to_peripheral(
-    peripheral: Peripheral,
+    peripheral: &Peripheral,
     characteristic: &Characteristic,
-    packet: &Vec<u8>,
+    packet: &[u8],
 ) -> Result<(), ProtocolError> {
     peripheral
         .write(characteristic, packet, WriteType::WithResponse)
@@ -120,5 +122,3 @@ pub async fn write_to_peripheral(
         })?;
     Ok(())
 }
-
-pub fn read_from_peripheral() {}

@@ -3,16 +3,14 @@ use crate::error::ProtocolError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Command {
-    On = 0x01,
-    Off = 0x02,
-    Status = 0x03,
-    Preflight = 0x04,
-    Arm = 0x05,
-    Test = 0x06,
-    Hover = 0x07,
-    Loiter = 0x08,
-    Waypoint = 0x09,
-    Disarm = 0x0a,
+    Status = 0x01,
+    Preflight = 0x02,
+    Arm = 0x03,
+    Test = 0x04,
+    Hover = 0x05,
+    Loiter = 0x06,
+    Waypoint = 0x07,
+    Disarm = 0x08,
 }
 
 impl TryFrom<u8> for Command {
@@ -20,16 +18,14 @@ impl TryFrom<u8> for Command {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0x01 => Ok(Self::On),
-            0x02 => Ok(Self::Off),
-            0x03 => Ok(Self::Status),
-            0x04 => Ok(Self::Preflight),
-            0x05 => Ok(Self::Arm),
-            0x06 => Ok(Self::Test),
-            0x07 => Ok(Self::Hover),
-            0x08 => Ok(Self::Loiter),
-            0x09 => Ok(Self::Waypoint),
-            0x0a => Ok(Self::Disarm),
+            0x01 => Ok(Self::Status),
+            0x02 => Ok(Self::Preflight),
+            0x03 => Ok(Self::Arm),
+            0x04 => Ok(Self::Test),
+            0x05 => Ok(Self::Hover),
+            0x06 => Ok(Self::Loiter),
+            0x07 => Ok(Self::Waypoint),
+            0x08 => Ok(Self::Disarm),
             value => Err(ProtocolError::UnknownCommand(value)),
         }
     }
@@ -42,15 +38,15 @@ impl From<Command> for u8 {
 }
 
 #[must_use]
-pub fn encode_command(command: Command) -> Vec<u8> {
+pub fn serialize_command(command: Command) -> Vec<u8> {
     vec![command.into()]
 }
 
-/// Decodes command
+/// Deserializes command
 ///
 /// # Errors
 /// Returns [`ProtocolError`] if invalid data received
-pub fn decode_command(data: &[u8]) -> Result<Command, ProtocolError> {
+pub fn deserialize_command(data: &[u8]) -> Result<Command, ProtocolError> {
     let byte = *data.first().ok_or(ProtocolError::EmptyCommand)?;
     Command::try_from(byte)
 }
@@ -61,8 +57,6 @@ pub fn decode_command(data: &[u8]) -> Result<Command, ProtocolError> {
 /// Returns [`ProtocolError`] if unable to parse command
 pub fn parse_command(input: &str) -> Result<Command, ProtocolError> {
     match input.to_lowercase().as_str() {
-        "on" => Ok(Command::On),
-        "off" => Ok(Command::Off),
         "status" => Ok(Command::Status),
         "preflight" => Ok(Command::Preflight),
         "arm" => Ok(Command::Arm),
@@ -103,7 +97,7 @@ impl From<Response> for u8 {
 }
 
 #[must_use]
-pub fn encode_response(response: Response) -> Vec<u8> {
+pub fn serialize_response(response: Response) -> Vec<u8> {
     vec![response.into()]
 }
 
@@ -111,7 +105,7 @@ pub fn encode_response(response: Response) -> Vec<u8> {
 ///
 /// # Errors
 /// Returns [`ProtocolError`] if invalid data received
-pub fn decode_response(data: &[u8]) -> Result<Response, ProtocolError> {
+pub fn deserialize_response(data: &[u8]) -> Result<Response, ProtocolError> {
     let byte = *data.first().ok_or(ProtocolError::EmptyCommand)?;
     Response::try_from(byte)
 }
@@ -122,27 +116,30 @@ mod tests {
 
     #[test]
     fn command_round_trip() {
-        for command in [Command::On, Command::Off, Command::Status] {
-            let encoded = encode_command(command);
-            assert_eq!(decode_command(&encoded), Ok(command));
+        for command in [Command::Arm, Command::Disarm, Command::Status] {
+            let encoded = serialize_command(command);
+            assert_eq!(deserialize_command(&encoded), Ok(command));
         }
     }
 
     #[test]
     fn rejects_unknown_command() {
         assert_eq!(
-            decode_command(&[0xff]),
+            deserialize_command(&[0xff]),
             Err(ProtocolError::UnknownCommand(0xff))
         );
     }
 
     #[test]
     fn rejects_empty_command() {
-        assert_eq!(decode_command(&[]), Err(ProtocolError::EmptyCommand));
+        assert_eq!(deserialize_command(&[]), Err(ProtocolError::EmptyCommand));
     }
 
     #[test]
     fn extra_payload_is_ignored_for_mvp() {
-        assert_eq!(decode_command(&[Command::On as u8, 0xaa]), Ok(Command::On));
+        assert_eq!(
+            deserialize_command(&[Command::Arm as u8, 0xaa]),
+            Ok(Command::Arm)
+        );
     }
 }

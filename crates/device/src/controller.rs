@@ -1,24 +1,23 @@
-use crate::safety_lights::SafetyLights;
-use crate::telemetry::Telemetry;
 use bluer::{
     Adapter, Session,
     adv::{Advertisement, AdvertisementHandle},
     gatt::local::{
-        Application, ApplicationHandle, Characteristic, CharacteristicRead, CharacteristicWrite,
+        Application, ApplicationHandle, Characteristic, CharacteristicNotify,
+        CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite,
         CharacteristicWriteMethod, Service,
     },
 };
 use communication_protocol::{
-    COMMAND_CHARACTERISTIC_UUID,
-    DEVICE_NAME,
-    SERVICE_UUID, //TELEMETRY_CHARACTERISTIC_UUID,
+    COMMAND_CHARACTERISTIC_UUID, DEVICE_NAME, SERVICE_UUID, TELEMETRY_CHARACTERISTIC_UUID,
 };
 use communication_protocol::{
     Response,
-    prelude::{Command, ProtocolError, decode_command, encode_response},
+    prelude::{Command, ProtocolError, deserialize_command, serialize_response},
 };
 use futures::FutureExt;
+use safety_lights::SafetyLights;
 use std::sync::Arc;
+use telemetry::Telemetry;
 use tokio::sync::Mutex;
 
 pub struct Controller {
@@ -30,19 +29,22 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub async fn new() -> Result<Self, ProtocolError> {
+    pub async fn new(
+        safety_lights: Arc<Mutex<SafetyLights>>,
+        telemetry: Arc<Mutex<Telemetry>>,
+    ) -> Result<Self, ProtocolError> {
         let session = bluer::Session::new()
             .await
-            .map_err(|e| ProtocolError::Bluetooth(e.message.to_string()))?;
+            .map_err(|e| ProtocolError::Bluetooth(e.message))?;
         let adapter = session
             .default_adapter()
             .await
-            .map_err(|e| ProtocolError::Bluetooth(e.message.to_string()))?;
+            .map_err(|e| ProtocolError::Bluetooth(e.message))?;
 
         adapter
             .set_powered(true)
             .await
-            .map_err(|e| ProtocolError::Bluetooth(e.message.to_string()))?;
+            .map_err(|e| ProtocolError::Bluetooth(e.message))?;
 
         println!("Bluetooth adapter: {}", adapter.name());
         println!(
@@ -50,11 +52,8 @@ impl Controller {
             adapter
                 .address()
                 .await
-                .map_err(|e| ProtocolError::Bluetooth(e.message.to_string()))?
+                .map_err(|e| ProtocolError::Bluetooth(e.message))?
         );
-
-        let safety_lights = Arc::new(Mutex::new(SafetyLights::new(17, 27)?));
-        let telemetry = Arc::new(Mutex::new(Telemetry::new(23)?));
 
         Ok(Self {
             _session: session,
@@ -76,14 +75,14 @@ impl Controller {
             self.adapter
                 .advertise(advertisement)
                 .await
-                .map_err(|e| ProtocolError::Bluetooth(e.message.to_string()))?,
+                .map_err(|e| ProtocolError::Bluetooth(e.message))?,
         );
 
         Ok(())
     }
 
     pub async fn new_application(
-        &mut self,
+        &self,
         value_read: Arc<Mutex<Vec<u8>>>,
         value_write: Arc<Mutex<Vec<u8>>>,
     ) -> Result<ApplicationHandle, ProtocolError> {
@@ -92,9 +91,8 @@ impl Controller {
                 uuid: SERVICE_UUID,
                 primary: true,
                 characteristics: vec![
-                    self.command_response_characteristic(value_read, value_write)
-                        .await
-                        .map_err(|e| ProtocolError::Bluetooth(e.to_string()))?,
+                    self.command_response_characteristic(value_read, value_write),
+                    self.telemetry_characteristic(),
                 ],
                 ..Default::default()
             }],
@@ -105,18 +103,17 @@ impl Controller {
             .adapter
             .serve_gatt_application(application)
             .await
-            .map_err(|e| ProtocolError::Bluetooth(e.message.to_string()))?;
+            .map_err(|e| ProtocolError::Bluetooth(e.message))?;
         Ok(handle)
     }
 
-    pub async fn command_response_characteristic(
-        &mut self,
+    pub fn command_response_characteristic(
+        &self,
         value_read: Arc<Mutex<Vec<u8>>>,
         value_write: Arc<Mutex<Vec<u8>>>,
-    ) -> Result<Characteristic, ProtocolError> {
-        let telemetry = self.telemetry.clone();
+    ) -> Characteristic {
         let safety = self.safety_lights.clone();
-        Ok(Characteristic {
+        Characteristic {
             uuid: COMMAND_CHARACTERISTIC_UUID,
             read: Some(CharacteristicRead {
                 read: true,
@@ -131,41 +128,18 @@ impl Controller {
                 write_without_response: true,
                 method: CharacteristicWriteMethod::Fun(Box::new(move |data, _request| {
                     let value = value_write.clone();
-                    let tx = telemetry.clone();
                     let safety = safety.clone();
                     async move {
-                        let command = decode_command(&data)
+                        let command = deserialize_command(&data)
                             .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
-                        let mut tx_guard = tx.lock().await;
                         let mut safety_guard = safety.lock().await;
                         let response = match command {
-                            Command::On => {
-                                tx_guard
-                                    .run()
-                                    .await
-                                    .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
-                                Response::On
-                            }
-                            Command::Off => {
-                                tx_guard
-                                    .stop()
-                                    .await
-                                    .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
-                                Response::Off
-                            }
-                            Command::Status => {
-                                if tx_guard.is_on {
-                                    Response::On
-                                } else {
-                                    Response::Off
-                                }
-                            }
                             Command::Arm => {
-                                let _ = safety_guard.run().await;
+                                let () = safety_guard.run();
                                 Response::Ok
                             }
                             Command::Disarm => {
-                                let _ = safety_guard.stop().await;
+                                let _ = safety_guard.stop();
                                 Response::Ok
                             }
                             _ => {
@@ -173,8 +147,9 @@ impl Controller {
                                 Response::Ok
                             }
                         };
-                        *value.lock().await = encode_response(response);
+                        *value.lock().await = serialize_response(response);
                         println!("command={command:?} state={response:?}");
+                        drop(safety_guard);
                         Ok(())
                     }
                     .boxed()
@@ -182,6 +157,28 @@ impl Controller {
                 ..Default::default()
             }),
             ..Default::default()
-        })
+        }
+    }
+
+    pub fn telemetry_characteristic(&self) -> Characteristic {
+        let telemetry = self.telemetry.clone();
+        Characteristic {
+            uuid: TELEMETRY_CHARACTERISTIC_UUID,
+            notify: Some(CharacteristicNotify {
+                notify: true,
+                method: CharacteristicNotifyMethod::Fun(Box::new(move |notifier| {
+                    let tx = telemetry.clone();
+
+                    async move {
+                        // Give telemetry_function a handle to this BLE client.
+                        let mut tx_guard = tx.lock().await;
+                        let _ = tx_guard.notification_stream();
+                    }
+                    .boxed()
+                })),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 }
