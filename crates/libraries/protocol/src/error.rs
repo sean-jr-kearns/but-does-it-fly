@@ -5,8 +5,8 @@ pub enum ProtocolError {
     #[error("empty command")]
     EmptyCommand,
 
-    #[error("unknown command: 0x{0:02x}")]
-    UnknownCommand(u8),
+    #[error("unknown command:{0}")]
+    UnknownCommand(String),
 
     #[error("invalid state: 0x{0:02x}")]
     InvalidState(u8),

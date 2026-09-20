@@ -26,7 +26,7 @@ impl TryFrom<u8> for Command {
             0x06 => Ok(Self::Loiter),
             0x07 => Ok(Self::Waypoint),
             0x08 => Ok(Self::Disarm),
-            value => Err(ProtocolError::UnknownCommand(value)),
+            _ => Err(ProtocolError::UnknownCommand("unknown command".to_string())),
         }
     }
 }
@@ -85,7 +85,9 @@ impl TryFrom<u8> for Response {
             0x01 => Ok(Self::r#Ok),
             0x02 => Ok(Self::On),
             0x03 => Ok(Self::Off),
-            value => Err(ProtocolError::UnknownCommand(value)),
+            _ => Err(ProtocolError::UnknownCommand(
+                "unknown response".to_string(),
+            )),
         }
     }
 }
@@ -126,7 +128,7 @@ mod tests {
     fn rejects_unknown_command() {
         assert_eq!(
             deserialize_command(&[0xff]),
-            Err(ProtocolError::UnknownCommand(0xff))
+            Err(ProtocolError::UnknownCommand("unknown command".to_string()))
         );
     }
 

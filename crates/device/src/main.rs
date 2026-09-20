@@ -7,31 +7,36 @@ use communication_protocol::{Response, prelude::serialize_response};
 use safety_lights::SafetyLights;
 use std::sync::Arc;
 use telemetry::Telemetry;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 
 use crate::controller::Controller;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> bluer::Result<()> {
     env_logger::init();
-
+    let (sender, _) = broadcast::channel::<Vec<u8>>(16);
     let safety_lights =
         Arc::new(Mutex::new(SafetyLights::new(17, 27).map_err(|e| {
             bluer::Error::from(std::io::Error::other(e.to_string()))
         })?));
     let telemetry =
-        Arc::new(Mutex::new(Telemetry::new(23).map_err(|e| {
+        Arc::new(Mutex::new(Telemetry::new(23, sender).map_err(|e| {
             bluer::Error::from(std::io::Error::other(e.to_string()))
         })?));
 
     let publisher = Arc::clone(&telemetry);
     tokio::spawn(async move {
-        let mut telemetry_guard = publisher.lock().await;
-        let _ = telemetry_guard.publish().await;
-        drop(telemetry_guard);
+        {
+            loop {
+                let mut telemetry_guard = publisher.lock().await;
+                let _ = telemetry_guard.publish().await;
+                drop(telemetry_guard);
+                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            }
+        }
     });
 
-    let mut controller = Controller::new(safety_lights, telemetry)
+    let mut controller = Controller::new(&safety_lights, &telemetry)
         .await
         .map_err(|e| {
             let io_err = std::io::Error::other(e.to_string());

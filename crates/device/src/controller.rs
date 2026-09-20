@@ -18,20 +18,20 @@ use futures::FutureExt;
 use safety_lights::SafetyLights;
 use std::sync::Arc;
 use telemetry::Telemetry;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 
-pub struct Controller {
+pub struct Controller<'a> {
     _session: Session,
     pub adapter: Adapter,
     pub advertisements: Vec<AdvertisementHandle>,
-    pub safety_lights: Arc<Mutex<SafetyLights>>,
-    pub telemetry: Arc<Mutex<Telemetry>>,
+    pub safety_lights: &'a Arc<Mutex<SafetyLights>>,
+    pub telemetry: &'a Arc<Mutex<Telemetry>>,
 }
 
-impl Controller {
+impl<'a> Controller<'a> {
     pub async fn new(
-        safety_lights: Arc<Mutex<SafetyLights>>,
-        telemetry: Arc<Mutex<Telemetry>>,
+        safety_lights: &'a Arc<Mutex<SafetyLights>>,
+        telemetry: &'a Arc<Mutex<Telemetry>>,
     ) -> Result<Self, ProtocolError> {
         let session = bluer::Session::new()
             .await
@@ -160,19 +160,32 @@ impl Controller {
         }
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     pub fn telemetry_characteristic(&self) -> Characteristic {
         let telemetry = self.telemetry.clone();
         Characteristic {
             uuid: TELEMETRY_CHARACTERISTIC_UUID,
             notify: Some(CharacteristicNotify {
                 notify: true,
-                method: CharacteristicNotifyMethod::Fun(Box::new(move |notifier| {
+                method: CharacteristicNotifyMethod::Fun(Box::new(move |mut notifier| {
                     let tx = telemetry.clone();
-
                     async move {
-                        // Give telemetry_function a handle to this BLE client.
-                        let mut tx_guard = tx.lock().await;
-                        let _ = tx_guard.notification_stream();
+                        let mut rx = tx.lock().await.subscribe();
+                        loop {
+                            match rx.recv().await {
+                                Ok(data) => {
+                                    if notifier.notify(data).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(broadcast::error::RecvError::Lagged(n)) => {
+                                    eprintln!("BLE telemetry receiver lagged by {n} messages");
+                                }
+                                Err(broadcast::error::RecvError::Closed) => {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     .boxed()
                 })),

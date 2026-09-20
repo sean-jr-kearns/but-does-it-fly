@@ -274,10 +274,7 @@ dependencies = [
 name = "communication-protocol"
 version = "0.1.0"
 dependencies = [
- "postcard",
- "serde",
  "thiserror",
- "tracing",
  "uuid",
 ]
 
@@ -436,12 +433,9 @@ dependencies = [
  "communication-protocol",
  "env_logger",
  "futures",
- "log",
- "rppal",
  "safety-lights",
  "telemetry",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -1095,7 +1089,6 @@ name = "safety-lights"
 version = "0.1.0"
 dependencies = [
  "communication-protocol",
- "futures",
  "gpio-lights",
  "rppal",
  "tokio",
@@ -1263,7 +1256,6 @@ dependencies = [
  "btleplug",
  "communication-protocol",
  "futures",
- "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1342,8 +1334,6 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
- "tokio-util",
- "uuid",
 ]
 
 [[package]]
