@@ -176,6 +176,15 @@ sudo service bluetooth start
 #ls -la /run/dbus/system_bus_socket
 ```
 
+Make pairable
+
+```bash
+bluetoothctl
+power on
+discoverable on
+pairable on
+```
+
 ```bash
 cargo run -p station
 # Enter command: 

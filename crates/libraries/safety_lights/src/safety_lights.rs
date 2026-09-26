@@ -57,27 +57,32 @@ impl SafetyLights {
                 tokio::select! {
                     // Instantly exit if the stop command is issued
                     () = token.cancelled() => {
-                        println!("Stop command received. Safely shutting down safety-lights...");
-                        // Ensure pins are left in a safe/default state
-                        let _green = green.lock().await.set_off();
-                        let _red = red.lock().await.set_off();
+                        let mut green_guard = green.lock().await;
+                        let mut red_guard = red.lock().await;
+                        let _ = green_guard.set_off();
+                        let _ = red_guard.set_off();
                         break;
                     }
 
                     // Toggling Sequence
                     () = async {
-                        let mut green = green.lock().await;
-                        let mut red = red.lock().await;
+                        {
+                            let mut green_guard = green.lock().await;
+                            let mut red_guard = red.lock().await;
+                            let _ = green_guard.set_on();
+                            let _ = red_guard.set_on();
+                        }
 
-                        let _ = green.set_on();
-                        let _ = red.set_on();
+                        // Sleep safely without holding any locks
                         sleep(Duration::from_millis(1000)).await;
-
-                        let _ = green.set_off();
-                        let _ = red.set_off();
+                        {
+                            let mut green_guard = green.lock().await;
+                            let mut red_guard = red.lock().await;
+                            let _ = green_guard.set_off();
+                            let _ = red_guard.set_off();
+                        }
+                        // Sleep safely without holding any locks
                         sleep(Duration::from_millis(1000)).await;
-                        drop(green);
-                        drop(red);
                     } => {}
                 }
             }
@@ -95,6 +100,7 @@ impl SafetyLights {
 
         // Wait for the loop to finish its cleanup
         self.handle = None;
+        self.cancellation_token = CancellationToken::new();
         println!("Safety-lights stopped");
         true
     }

@@ -2,7 +2,9 @@ use crate::btle::find_advertised_characteristic_by_id;
 use btleplug::{api::Peripheral as _, platform::Peripheral};
 use communication_protocol::{ProtocolError, TELEMETRY_CHARACTERISTIC_UUID};
 use futures::StreamExt;
+use std::time::Duration;
 use tokio::task::JoinHandle;
+use tokio::{pin, signal, time};
 use tracing::{error, info};
 
 pub fn stream_telemetry_from_peripheral(
@@ -10,6 +12,10 @@ pub fn stream_telemetry_from_peripheral(
 ) -> JoinHandle<std::result::Result<(), ProtocolError>> {
     let telemetry_peripheral = peripheral.clone();
     tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(1));
+        let ctrl_c = signal::ctrl_c();
+        pin!(ctrl_c);
+
         let telemetry_characteristic = find_advertised_characteristic_by_id(
             &telemetry_peripheral,
             TELEMETRY_CHARACTERISTIC_UUID,
@@ -50,18 +56,26 @@ pub fn stream_telemetry_from_peripheral(
         }
 
         loop {
-            match telemetry_peripheral
-                .read(&telemetry_characteristic)
-                .await
-                .map_err(|_| {
-                    ProtocolError::InvalidPeripheral("unable to read peripheral stream".to_string())
-                }) {
-                Ok(telemetry) => {
-                    info!("telemetry: {telemetry:?}");
+            tokio::select! {
+                _ = interval.tick() => {
+                    match telemetry_peripheral
+                        .read(&telemetry_characteristic)
+                        .await
+                        .map_err(|_| {
+                            ProtocolError::InvalidPeripheral("unable to read peripheral stream".to_string())
+                        }) {
+                        Ok(telemetry) => {
+                            info!("telemetry: {telemetry:?}");
+                        }
+                        Err(e) => {
+                            error!("Error processing telemetry: {e:?}...");
+                            break;
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!("Error processing telemetry: {e:?}...");
-                    break;
+                _ = &mut ctrl_c => {
+                    info!("\nCtrl+C received! Shutting down gracefully...");
+                    break; // Break the loop to stop the program
                 }
             }
         }
