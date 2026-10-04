@@ -1,3 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/light-show", "crates/protocol", "crates/receiver", "crates/sender"]
+members = [
+    "crates/device",
+    "crates/libraries/gpio_lights",
+    "crates/libraries/protocol",
+    "crates/libraries/telemetry",
+    "crates/station",
+]

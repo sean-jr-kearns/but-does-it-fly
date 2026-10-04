@@ -1,38 +1,46 @@
-use std::error::Error;
-
-pub trait LightOutput {
-    fn set_on(&mut self) -> Result<(), Box<dyn Error + Send + Sync>>;
-    fn set_off(&mut self) -> Result<(), Box<dyn Error + Send + Sync>>;
+pub trait Pin {
+    /// Turns pin high
+    ///
+    /// # Errors
+    /// Returns error if unable to manipulate pin state
+    fn set_on(&mut self) -> Result<(), rppal::gpio::Error>;
+    /// Turns pin low
+    ///
+    /// # Errors
+    /// Returns error if unable to manipulate pin state
+    fn set_off(&mut self) -> Result<(), rppal::gpio::Error>;
+    #[warn(unused)]
     fn is_on(&self) -> bool;
 }
 
 #[cfg(test)]
-pub struct MockLight {
+pub struct MockPin {
     on: bool,
 }
 
 #[cfg(test)]
-impl MockLight {
+impl MockPin {
+    #[must_use]
     pub const fn new() -> Self {
         Self { on: false }
     }
 }
 
 #[cfg(test)]
-impl Default for MockLight {
+impl Default for MockPin {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[cfg(test)]
-impl LightOutput for MockLight {
-    fn set_on(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+impl Pin for MockPin {
+    fn set_on(&mut self) -> Result<(), rppal::gpio::Error> {
         self.on = true;
         Ok(())
     }
 
-    fn set_off(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn set_off(&mut self) -> Result<(), rppal::gpio::Error> {
         self.on = false;
         Ok(())
     }
@@ -49,23 +57,27 @@ pub struct Indicator {
 
 #[cfg(target_os = "linux")]
 impl Indicator {
-    pub fn new(bcm_pin: u8) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    /// Creates new gpio pin
+    ///
+    /// # Errors
+    /// Returns error if unable to create new pin representation
+    pub fn new(gpio_pin: u8) -> Result<Self, rppal::gpio::Error> {
         let gpio = rppal::gpio::Gpio::new()?;
 
-        let pin = gpio.get(bcm_pin)?.into_output_low();
+        let pin = gpio.get(gpio_pin)?.into_output_low();
 
         Ok(Self { pin })
     }
 }
 
 #[cfg(target_os = "linux")]
-impl LightOutput for Indicator {
-    fn set_on(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+impl Pin for Indicator {
+    fn set_on(&mut self) -> Result<(), rppal::gpio::Error> {
         self.pin.set_high();
         Ok(())
     }
 
-    fn set_off(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn set_off(&mut self) -> Result<(), rppal::gpio::Error> {
         self.pin.set_low();
         Ok(())
     }
@@ -81,7 +93,7 @@ mod tests {
 
     #[test]
     fn mock_starts_off() {
-        let light = MockLight::new();
+        let light = MockPin::new();
 
         assert!(!light.is_on());
     }
@@ -89,7 +101,7 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn mock_turns_on() {
-        let mut light = MockLight::new();
+        let mut light = MockPin::new();
 
         light.set_on().unwrap();
 
@@ -99,7 +111,7 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn mock_turns_off() {
-        let mut light = MockLight::new();
+        let mut light = MockPin::new();
 
         light.set_on().unwrap();
         light.set_off().unwrap();

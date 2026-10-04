@@ -4,9 +4,6 @@ This project is a toy problem to play around with using rust for an embedded use
 ## Software Roadmap
 Currently BLE commands are setup to turn a gpio pinned light on and off. Device pairing is a bit tedious right now as each time the sender starts it must re-pair
 
-- `crates/light-show`: red (left)/green (right) lights flashing for external directional awareness of the drone now
-- `crates/(protocol,receiver,sender)`: ack light rx (blue) tx (white) for automated commanding
-- `TBD`: tie light-show features into arm/disarm commands
 - `TBD`: tie automated commanding to switch on controller for safety
 - `TBD`: verify light ack responds as expected to controller switch
 - `TBD`: setup bridge between pc and the pi (bluetooth)
@@ -15,6 +12,7 @@ Currently BLE commands are setup to turn a gpio pinned light on and off. Device 
 - `TBD`: test hover command 
 - `TBD`: test touchdown command
 - `TBD`: test slight manuever command
+- `TBD`: ble auth impl
 
 ## Hardware
 - [Hawks F450 Drone Kit](https://www.hawks-work.com/products/f450-drone-kit-to-build-diy-450mm-wheelbase-4-axis-multi-rotor-drone-kit-b) 
@@ -93,7 +91,7 @@ Higher resistence here for pin safety due to lower visibility requirement
 - rpi gpio 22 -> 303 ohm resistor -> blue led -> ground
 
 ## Building
-The `protocol`, `sender`, and `reciever` crates in this project are built for various targets based on their usage. Supported targets are as follows: 
+The `protocol`, `station`, and `device` crates in this project are built for various targets based on their usage. Supported targets are as follows: 
 
 - `aarch64-unknown-linux-gnu`
 - `x86_64-unknown-linux-gnu`
@@ -110,69 +108,34 @@ rustup target add x86_64-pc-windows-gnu
 rustup target add aarch64-unknown-linux-gnu
 ```
 
-### light-show
-```bash
-CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build -p light-show --target aarch64-unknown-linux-gnu --release
-```
+### Quick Build Commands
+The current implementation is cross-platform (except for `device`). Below is the set of build commands for this prototype's use case. 
 
-### protocol
-
-#### Linux ARM64
 ```bash
+# Libs (windows x86-64 linux arm64)
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-DEVICE_NAME="flyer-1" \
-SERVICE_UUID="0x1234_5678_1234_5678_1234_5678_9abc_def0" \
-COMMAND_CHARACTERISTIC_UUID="0x1234_5678_1234_5678_1234_5678_9abc_def1" \
 cargo build -p communication-protocol --target aarch64-unknown-linux-gnu --release
-```
-
-#### Linux x86_64
-```bash
-DEVICE_NAME="flyer-1" \
-SERVICE_UUID="0x1234_5678_1234_5678_1234_5678_9abc_def0" \
-COMMAND_CHARACTERISTIC_UUID="0x1234_5678_1234_5678_1234_5678_9abc_def1" \
-cargo build -p communication-protocol --target x86_64-unknown-linux-gnu --release
-```
-
-### Sender
-#### Linux ARM64
-```bash
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+cargo build -p gpio-lights --target aarch64-unknown-linux-gnu --release
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+cargo build -p safety-lights --target aarch64-unknown-linux-gnu --release
 PKG_CONFIG_DIR="" \
 PKG_CONFIG_SYSROOT_DIR="/" \
 PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
 PKG_CONFIG_ALLOW_CROSS=1 \
 BINDGEN_EXTRA_CLANG_ARGS="--sysroot=/usr/aarch64-linux-gnu" \
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-cargo build -p sender --target aarch64-unknown-linux-gnu --release
-```
-
-#### Linux x86_64
-```bash
-cargo build -p sender --target x86_64-unknown-linux-gnu --release
-```
-
-#### Windows x86_64
-```bash
-cargo build -p sender --target x86_64-pc-windows-gnu --release
-```
-
-### Receiver
-**Note** the service/command uuids and device name are examples.
-
-#### Linux ARM64
-```bash
+cargo build -p telemetry --target aarch64-unknown-linux-gnu --release
+# device (linux arm64)
 PKG_CONFIG_DIR="" \
 PKG_CONFIG_SYSROOT_DIR="/" \
 PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
 PKG_CONFIG_ALLOW_CROSS=1 \
 BINDGEN_EXTRA_CLANG_ARGS="--sysroot=/usr/aarch64-linux-gnu" \
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-cargo build -p receiver --target aarch64-unknown-linux-gnu --release
-```
-
-#### Linux x86_64
-```bash
-cargo build -p receiver --target x86_64-unknown-linux-gnu --release
+cargo build -p device --target aarch64-unknown-linux-gnu --release
+# station (windows x86-64)
+cargo build -p station --target x86_64-pc-windows-gnu --release
 ```
 
 ## Running
@@ -183,13 +146,13 @@ cargo build -p receiver --target x86_64-unknown-linux-gnu --release
 To get the service on the rpi I have been `scp`'ing it with"
 
 ```bash
-scp ./target/aarch64-unknown-linux-gnu/release/sender user@ip:/opt/but-does-it-fly
+scp ./target/aarch64-unknown-linux-gnu/release/device user@ip:/opt/but-does-it-fly
 ```
 
 To run 
 
 ```bash
-sudo <service-path>/receiver
+sudo <service-path>/device
 # ...
 # Bluetooth adapter: hci0
 # Bluetooth address: XX:XX:XX:XX:XX:XX
@@ -218,18 +181,27 @@ sudo service bluetooth start
 #ls -la /run/dbus/system_bus_socket
 ```
 
+Make pairable
+
 ```bash
-cargo run -p sender -- on
-cargo run -p sender -- off
-cargo run -p sender -- status
+bluetoothctl
+power on
+discoverable on
+pairable on
+```
+
+```bash
+cargo run -p station
+# Enter command: 
+# on, off, status, arm, disarm, ...
 ```
 
 ## Linting
 ```bash 
-cargo fmt # Format
+cargo fmt --all # Format
 cargo machete # Unused depenency check 
-cargo sort # Sort imports
-cargo clippy --all-targets # Lint
+cargo sort --workspace # Sort imports
+cargo clippy --workspace --all-targets --all-features # Lint
 ```
 
 ## Testing
@@ -247,4 +219,15 @@ cargo doc --lib --no-deps
 ```
 
 ## Troubleshooting
+
+### Devcontainer permissions
 Sometimes on devcontainer restart may need to `sudo chown -R $(whoami):$(id -g) /usr/local/cargo` if different user
+
+### Gpio permissions
+Ran into some issues where the user didn't have `gpiomem` permissions. To update run and verify with:
+
+```bash
+sudo usermod -aG gpio $USER
+exec su -l $USER
+ls -l /dev/gpiomem
+```
