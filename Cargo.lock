@@ -433,7 +433,7 @@ dependencies = [
  "communication-protocol",
  "env_logger",
  "futures",
- "safety-lights",
+ "gpio-lights",
  "telemetry",
  "tokio",
 ]
@@ -1085,17 +1085,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
-name = "safety-lights"
-version = "0.1.0"
-dependencies = [
- "communication-protocol",
- "gpio-lights",
- "rppal",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1328,6 +1317,7 @@ name = "telemetry"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "bluer",
  "futures",
  "gpio-lights",
  "postcard",

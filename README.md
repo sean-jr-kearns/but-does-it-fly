@@ -119,6 +119,11 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
 cargo build -p gpio-lights --target aarch64-unknown-linux-gnu --release
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
 cargo build -p safety-lights --target aarch64-unknown-linux-gnu --release
+PKG_CONFIG_DIR="" \
+PKG_CONFIG_SYSROOT_DIR="/" \
+PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
+PKG_CONFIG_ALLOW_CROSS=1 \
+BINDGEN_EXTRA_CLANG_ARGS="--sysroot=/usr/aarch64-linux-gnu" \
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
 cargo build -p telemetry --target aarch64-unknown-linux-gnu --release
 # device (linux arm64)

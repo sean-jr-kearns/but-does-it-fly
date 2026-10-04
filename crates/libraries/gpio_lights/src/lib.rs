@@ -61,10 +61,10 @@ impl Indicator {
     ///
     /// # Errors
     /// Returns error if unable to create new pin representation
-    pub fn new(bcm_pin: u8) -> Result<Self, rppal::gpio::Error> {
+    pub fn new(gpio_pin: u8) -> Result<Self, rppal::gpio::Error> {
         let gpio = rppal::gpio::Gpio::new()?;
 
-        let pin = gpio.get(bcm_pin)?.into_output_low();
+        let pin = gpio.get(gpio_pin)?.into_output_low();
 
         Ok(Self { pin })
     }

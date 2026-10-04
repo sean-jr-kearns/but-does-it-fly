@@ -1,4 +1,5 @@
 use crate::error::ProtocolError;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -34,6 +35,21 @@ impl TryFrom<u8> for Command {
 impl From<Command> for u8 {
     fn from(value: Command) -> Self {
         value as Self
+    }
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Status => write!(f, "Status"),
+            Self::Preflight => write!(f, "Preflight"),
+            Self::Arm => write!(f, "Arm"),
+            Self::Test => write!(f, "Test"),
+            Self::Hover => write!(f, "Hover"),
+            Self::Loiter => write!(f, "Loiter"),
+            Self::Waypoint => write!(f, "Waypoint"),
+            Self::Disarm => write!(f, "Disarm"),
+        }
     }
 }
 

@@ -2,8 +2,8 @@ use bluer::{
     Adapter, Session,
     adv::{Advertisement, AdvertisementHandle},
     gatt::local::{
-        Application, ApplicationHandle, Characteristic, CharacteristicNotify,
-        CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite,
+        Application, ApplicationHandle, Characteristic, CharacteristicNotifier,
+        CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicRead, CharacteristicWrite,
         CharacteristicWriteMethod, Service,
     },
 };
@@ -15,27 +15,30 @@ use communication_protocol::{
     prelude::{Command, ProtocolError, deserialize_command, serialize_response},
 };
 use futures::FutureExt;
-use safety_lights::SafetyLights;
 use std::sync::Arc;
-use telemetry::Telemetry;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 
-pub struct Controller<'a> {
+pub struct Controller {
     _session: Session,
     pub adapter: Adapter,
     pub advertisements: Vec<AdvertisementHandle>,
-    pub safety_lights: &'a Arc<Mutex<SafetyLights>>,
-    pub telemetry: &'a Arc<Mutex<Telemetry>>,
 }
 
-impl<'a> Controller<'a> {
-    pub async fn new(
-        safety_lights: &'a Arc<Mutex<SafetyLights>>,
-        telemetry: &'a Arc<Mutex<Telemetry>>,
-    ) -> Result<Self, ProtocolError> {
+impl Controller {
+    /// Creates a new [`Controller`] which manages a Device's bluetooth session,
+    /// adapter, and defined application interfaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns a  [`ProtocolError`] if unable to initialize a [`bluer::Session`]
+    /// or [`bluer::adapter::Adapter`] within the session.
+    pub async fn new() -> Result<Self, ProtocolError> {
+        // Establish D-Bus connection to the root of the bluez system service
+        // Discovers physically available hardware
         let session = bluer::Session::new()
             .await
             .map_err(|e| ProtocolError::Bluetooth(e.message))?;
+        // Given a session specify a bluetooth controller to communicate with
         let adapter = session
             .default_adapter()
             .await
@@ -59,8 +62,6 @@ impl<'a> Controller<'a> {
             _session: session,
             adapter,
             advertisements: Vec::new(),
-            safety_lights,
-            telemetry,
         })
     }
 
@@ -83,16 +84,17 @@ impl<'a> Controller<'a> {
 
     pub async fn new_application(
         &self,
-        value_read: Arc<Mutex<Vec<u8>>>,
-        value_write: Arc<Mutex<Vec<u8>>>,
+        last_response: Arc<Mutex<Response>>,
+        next_command: Arc<Mutex<Command>>,
+        notifier: Arc<Mutex<Option<CharacteristicNotifier>>>,
     ) -> Result<ApplicationHandle, ProtocolError> {
         let application = Application {
             services: vec![Service {
                 uuid: SERVICE_UUID,
                 primary: true,
                 characteristics: vec![
-                    self.command_response_characteristic(value_read, value_write),
-                    self.telemetry_characteristic(),
+                    Self::command_response_characteristic(last_response, next_command),
+                    Self::telemetry_characteristic(notifier),
                 ],
                 ..Default::default()
             }],
@@ -107,49 +109,49 @@ impl<'a> Controller<'a> {
         Ok(handle)
     }
 
+    /// Defines the command and response characteristic. `Station` publishes a command to `Device`
+    /// over D-BUS interface with id [`COMMAND_CHARACTERISTIC_UUID`].
     pub fn command_response_characteristic(
-        &self,
-        value_read: Arc<Mutex<Vec<u8>>>,
-        value_write: Arc<Mutex<Vec<u8>>>,
+        last_response: Arc<Mutex<Response>>,
+        next_command: Arc<Mutex<Command>>,
     ) -> Characteristic {
-        let safety = self.safety_lights.clone();
         Characteristic {
             uuid: COMMAND_CHARACTERISTIC_UUID,
+            // What station is trying to read from device
+            // e.g. can read current command or command response
             read: Some(CharacteristicRead {
                 read: true,
-                fun: Box::new(move |_request| {
-                    let value = value_read.clone();
-                    async move { Ok(value.lock().await.clone()) }.boxed()
+                fun: Box::new({
+                    let value = last_response.clone();
+                    move |_request| {
+                        let value = value.clone();
+                        async move { Ok(serialize_response(*value.lock().await)) }.boxed()
+                    }
                 }),
                 ..Default::default()
             }),
+            // What station is trying to write to the device
+            // e.g. the command
             write: Some(CharacteristicWrite {
                 write: true,
-                write_without_response: true,
-                method: CharacteristicWriteMethod::Fun(Box::new(move |data, _request| {
-                    let value = value_write.clone();
-                    let safety = safety.clone();
+                write_without_response: false,
+                method: CharacteristicWriteMethod::Fun(Box::new(move |command, _request| {
+                    let write_next_command = next_command.clone();
+                    let write_last_response = last_response.clone();
                     async move {
-                        let command = deserialize_command(&data)
+                        // Should be fine to shadow this right?
+                        let command = deserialize_command(&command)
                             .map_err(|_| bluer::gatt::local::ReqError::Failed)?;
-                        let mut safety_guard = safety.lock().await;
                         let response = match command {
-                            Command::Arm => {
-                                let () = safety_guard.run();
-                                Response::Ok
-                            }
-                            Command::Disarm => {
-                                let _ = safety_guard.stop();
-                                Response::Ok
-                            }
+                            Command::Arm | Command::Disarm => Response::Ok,
                             _ => {
                                 println!("Command not implemented");
                                 Response::Ok
                             }
                         };
-                        *value.lock().await = serialize_response(response);
+                        *write_last_response.lock().await = response;
+                        *write_next_command.lock().await = command;
                         println!("command={command:?} state={response:?}");
-                        drop(safety_guard);
                         Ok(())
                     }
                     .boxed()
@@ -160,32 +162,21 @@ impl<'a> Controller<'a> {
         }
     }
 
+    /// Defines the telemetry notification characteristic. `Device` publishes a notification to `Station`
+    /// over D-BUS interface with id [`TELEMETRY_CHARACTERISTIC_UUID`].
     #[allow(clippy::significant_drop_tightening)]
-    pub fn telemetry_characteristic(&self) -> Characteristic {
-        let telemetry = self.telemetry.clone();
+    pub fn telemetry_characteristic(
+        notifier: Arc<Mutex<Option<CharacteristicNotifier>>>,
+    ) -> Characteristic {
         Characteristic {
             uuid: TELEMETRY_CHARACTERISTIC_UUID,
             notify: Some(CharacteristicNotify {
                 notify: true,
-                method: CharacteristicNotifyMethod::Fun(Box::new(move |mut notifier| {
-                    let tx = telemetry.clone();
+                method: CharacteristicNotifyMethod::Fun(Box::new(move |characteristic_notifier| {
+                    let telemetry = notifier.clone();
                     async move {
-                        let mut rx = tx.lock().await.subscribe();
-                        loop {
-                            match rx.recv().await {
-                                Ok(data) => {
-                                    if notifier.notify(data).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Err(broadcast::error::RecvError::Lagged(n)) => {
-                                    eprintln!("BLE telemetry receiver lagged by {n} messages");
-                                }
-                                Err(broadcast::error::RecvError::Closed) => {
-                                    break;
-                                }
-                            }
-                        }
+                        let mut tx = telemetry.lock().await;
+                        *tx = Some(characteristic_notifier);
                     }
                     .boxed()
                 })),

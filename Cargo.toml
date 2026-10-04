@@ -4,7 +4,6 @@ members = [
     "crates/device",
     "crates/libraries/gpio_lights",
     "crates/libraries/protocol",
-    "crates/libraries/safety_lights",
     "crates/libraries/telemetry",
     "crates/station",
 ]
