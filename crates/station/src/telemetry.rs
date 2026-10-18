@@ -5,10 +5,12 @@ use futures::StreamExt;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 pub fn stream_telemetry_from_peripheral(
     peripheral: &Peripheral,
+    token: CancellationToken,
 ) -> JoinHandle<std::result::Result<(), ProtocolError>> {
     let telemetry_peripheral = peripheral.clone();
     tokio::spawn(async move {
@@ -70,6 +72,10 @@ pub fn stream_telemetry_from_peripheral(
                         }
                     }
                 }
+                () = token.cancelled() => {
+                        info!("Telemetry provider received cancel signal...");
+                        break;
+                    }
             }
         }
 
