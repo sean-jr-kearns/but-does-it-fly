@@ -16,8 +16,14 @@ use tracing::{error, info, warn};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start tracing
-    tracing_subscriber::fmt::init();
+    let file_appender = tracing_appender::rolling::daily("logs", "app.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_ansi(false) // Disable terminal colors for flat text files
+        .init();
     info!("Starting application. Type CTRL+C to exit");
+
     let mut interval = time::interval(Duration::from_secs(1));
     let ctrl_c = signal::ctrl_c();
     pin!(ctrl_c);

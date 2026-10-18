@@ -4,7 +4,7 @@ use communication_protocol::{ProtocolError, TELEMETRY_CHARACTERISTIC_UUID};
 use futures::StreamExt;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio::{pin, signal, time};
+use tokio::time;
 use tracing::{error, info};
 
 pub fn stream_telemetry_from_peripheral(
@@ -13,9 +13,6 @@ pub fn stream_telemetry_from_peripheral(
     let telemetry_peripheral = peripheral.clone();
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(1));
-        let ctrl_c = signal::ctrl_c();
-        pin!(ctrl_c);
-
         let telemetry_characteristic = find_advertised_characteristic_by_id(
             &telemetry_peripheral,
             TELEMETRY_CHARACTERISTIC_UUID,
@@ -72,10 +69,6 @@ pub fn stream_telemetry_from_peripheral(
                             break;
                         }
                     }
-                }
-                _ = &mut ctrl_c => {
-                    info!("\nCtrl+C received! Shutting down gracefully...");
-                    break; // Break the loop to stop the program
                 }
             }
         }
