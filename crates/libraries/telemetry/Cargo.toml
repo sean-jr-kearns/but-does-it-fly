@@ -1,12 +1,17 @@
 [package]
-name = "communication-protocol"
+name = "telemetry"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+async-stream = "0.3"
+bluer = { version = "0.17.4", features = ["bluetoothd"] }
+futures = "0.3"
+gpio-lights = { path = "../gpio_lights" }
+postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-uuid = "1"
+tokio = { version = "1", features = ["macros", "rt", "signal", "sync", "time"] }
 
 [lints.clippy]
 all = "deny"
